@@ -1,5 +1,10 @@
 $(function () {
 
+    $('#progressbar').hide();
+    $('#progressSwitch').on('click', function () {
+        $('#progressbar').show();
+    });
+
     $('#uploadFile').on('click', function () {
         const file = $('#file')[0].files[0];
 
