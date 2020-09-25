@@ -11,6 +11,9 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging;
 using Models;
 using Models.ViewModels;
+using NPOI.HSSF.UserModel;
+using NPOI.SS.UserModel;
+using NPOI.XSSF.UserModel;
 using OfficeOpenXml;
 using UploadExcel.Models;
 
@@ -86,6 +89,54 @@ namespace UploadExcel.Controllers
             return HttpResponse<List<User>>.GetResult(0, "OK", list);
         }
 
+        [HttpPost("import-sync")]
+        public HttpResponse<List<User>> Import(IFormFile file)
+        {
+            if (file == null || file.Length <= 0)
+            {
+                return HttpResponse<List<User>>.GetResult(-1, "File is empty.");
+            }
+
+            if (!Path.GetExtension(file.FileName).Equals(".xlsx", StringComparison.OrdinalIgnoreCase))
+            {
+                return HttpResponse<List<User>>.GetResult(-1, "Not Support file extension");
+            }
+
+            var list = new List<User>();
+            // If you use EPPlus in a noncommercial context
+            // according to the Polyform Noncommercial license:
+            ExcelPackage.LicenseContext = LicenseContext.NonCommercial;
+
+            using (var stream = new MemoryStream())
+            {
+                file.CopyToAsync(stream);
+
+                using (var package = new ExcelPackage(stream))
+                {
+
+                    ExcelWorksheet worksheet = package.Workbook.Worksheets[0];
+                    var rowCount = worksheet.Dimension.Rows;
+
+                    for (int row = 2; row <= rowCount; row++)
+                    {
+                        list.Add(new User
+                        {
+                            Name = worksheet.Cells[row, 1].Value.ToString().Trim(),
+                            Email = worksheet.Cells[row, 2].Value.ToString().Trim(),
+                            Age = int.Parse(worksheet.Cells[row, 3].Value.ToString().Trim()),
+
+                        });
+                    }
+                }
+            }
+
+            // add list to db ..  
+            // here just read and return  
+
+            return HttpResponse<List<User>>.GetResult(0, "OK", list);
+        }
+
+
         [HttpGet("export")]
         public async Task<HttpResponse<string>> Export(CancellationToken cancellationToken)
         {
@@ -141,6 +192,70 @@ namespace UploadExcel.Controllers
 
             //return File(stream, "application/octet-stream", excelName);  
             return File(stream, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", excelName);
+        }
+
+        [HttpPost("import-sync-npoi")]
+        public HttpResponse<List<User>> ImportNpoi(IFormFile file)
+        {
+            if (file == null || file.Length <= 0)
+            {
+                return HttpResponse<List<User>>.GetResult(-1, "File is empty.");
+            }
+
+            string fileExtension = Path.GetExtension(file.FileName);
+            if (!(fileExtension.Equals(".xlsx", StringComparison.OrdinalIgnoreCase)
+                || fileExtension.Equals(".xls", StringComparison.OrdinalIgnoreCase)))
+            {
+                return HttpResponse<List<User>>.GetResult(-1, "Not Support file extension");
+            }
+
+            var list = new List<User>();
+
+            using (var stream = new MemoryStream())
+            {
+                ISheet sheet;
+
+                file.CopyToAsync(stream);
+                stream.Position = 0;
+                if (fileExtension == ".xls") // excel 97-2000 formats
+                {
+                    HSSFWorkbook hssfWorkbook = new HSSFWorkbook(stream);
+                    sheet = hssfWorkbook.GetSheetAt(0);
+                }
+                else // excel 2007 format
+                {
+                    XSSFWorkbook xssfWorkbook = new XSSFWorkbook(stream);
+                    sheet = xssfWorkbook.GetSheetAt(0);
+                }
+
+                IRow headerRow = sheet.GetRow(0); // Row 0 is the header containing all columns
+                int cellCount = headerRow.LastCellNum; // note that the cell number is the size, RowNum is the index
+                if (cellCount != 3)
+                {
+
+                    return HttpResponse<List<User>>.GetResult(-1, "File should have 3 columns");
+                }
+
+                for (int i = sheet.FirstRowNum + 1; i <= sheet.LastRowNum; ++i)
+                {
+                    IRow row = sheet.GetRow(i);
+                    if (row == null) continue;
+
+                    list.Add(new User
+                    {
+                        Name = row.GetCell(0).ToString().Trim(),
+                        Email = row.GetCell(1).ToString().Trim(),
+                        Age = int.Parse(row.GetCell(2).ToString().Trim()),
+
+                    });
+                }
+
+            }
+
+            // add list to db ..  
+            // here just read and return  
+
+            return HttpResponse<List<User>>.GetResult(0, "OK", list);
         }
     }
 }
